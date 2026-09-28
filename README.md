@@ -2,6 +2,21 @@
 
 Small utilities for administering a [Postman](https://www.postman.com/) team.
 
+## Setup
+
+Both scripts read their API keys from a `.env` file in this directory
+(loaded via the shared `postman_env.py` helper -- no third-party dependency).
+Create one:
+
+```
+POSTMAN_API_KEY=PMAK-...    # team-admin key
+POSTMAN_SCIM_KEY=PMAK-...   # SCIM key (Team Settings -> SCIM provisioning)
+```
+
+See `.env.example` for the template. `.env` is listed in `.gitignore` and
+should never be committed. Values already set in your shell environment take
+precedence over `.env`.
+
 ## Scripts
 
 ### `postman_last_login_report.py`
@@ -27,9 +42,6 @@ stops once it reaches the retention floor or a run of empty windows.
 #### Usage
 
 ```sh
-export POSTMAN_API_KEY='PMAK-...'    # team-admin key
-export POSTMAN_SCIM_KEY='PMAK-...'   # SCIM key
-
 python3 postman_last_login_report.py [--since 2026-03-19] [--until 2026-06-17] [--out report.csv]
 ```
 
@@ -55,6 +67,40 @@ A CSV with the following columns:
 
 Users with no login event in the window get an empty `last_login_utc`, marking
 them as dormant.
+
+### `postman_remove_users.py`
+
+Deactivates a list of Postman team members via the SCIM API, driven by a CSV
+of `name,email` rows (e.g. the output of a dormant-user review).
+
+Postman's SCIM `DELETE` doesn't hard-delete an account -- it deactivates the
+user and revokes team access, which is what this script does.
+
+#### Requirements
+
+- Python 3.7+ (standard library only).
+- A Postman SCIM API key (Team Settings → SCIM provisioning) -- see [Setup](#setup).
+
+#### Usage
+
+```sh
+# Dry run first -- prints who *would* be removed, no changes made.
+python3 postman_remove_users.py --csv postman_dormant_active.csv
+
+# Actually deactivate. Prompts for interactive confirmation unless --yes.
+python3 postman_remove_users.py --csv postman_dormant_active.csv --execute
+```
+
+| Flag        | Description                                              | Default              |
+| ----------- | --------------------------------------------------------- | -------------------- |
+| `--csv`     | Input CSV with `name,email` columns                       | `postman_dormant_active.csv` |
+| `--execute` | Actually deactivate users (omit for a dry run)             | off (dry run)         |
+| `--yes`     | Skip the interactive confirmation prompt                  | off                    |
+| `--log`     | Path for the JSON audit log                                | `removal_log_<timestamp>.json` |
+
+Every run (dry or real) writes a JSON audit log recording what happened to
+each row -- removed, failed, skipped (not found / already inactive), or
+dry-run.
 
 ## License
 
