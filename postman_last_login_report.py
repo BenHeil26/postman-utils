@@ -8,8 +8,7 @@ Sources:
   - GET /audit/logs     (login events — uses regular admin API key)
 
 Usage:
-  set -x POSTMAN_API_KEY  'PMAK-...'   # team-admin key
-  set -x POSTMAN_SCIM_KEY 'PMAK-...'   # SCIM key (Team Settings -> SCIM provisioning)
+  # put POSTMAN_API_KEY and POSTMAN_SCIM_KEY in a .env file (see .env.example)
   python3 postman_last_login_report.py [--since 2026-03-19] [--out report.csv]
 
 Output columns:
@@ -28,6 +27,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from postman_env import load_dotenv
 
 BASE = "https://api.getpostman.com"
 
@@ -163,12 +164,13 @@ def main():
     ap.add_argument("--out", default="postman_last_login.csv")
     args = ap.parse_args()
 
+    load_dotenv()
     api_key = os.environ.get("POSTMAN_API_KEY")
     scim_key = os.environ.get("POSTMAN_SCIM_KEY")
     if not api_key:
-        raise SystemExit("set POSTMAN_API_KEY in your environment first")
+        raise SystemExit("set POSTMAN_API_KEY in a .env file (see .env.example) or the environment first")
     if not scim_key:
-        raise SystemExit("set POSTMAN_SCIM_KEY in your environment first")
+        raise SystemExit("set POSTMAN_SCIM_KEY in a .env file (see .env.example) or the environment first")
 
     print("fetching team roster via SCIM...", file=sys.stderr)
     users = list_users(scim_key)
