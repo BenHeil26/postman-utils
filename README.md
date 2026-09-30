@@ -102,6 +102,44 @@ Every run (dry or real) writes a JSON audit log recording what happened to
 each row -- removed, failed, skipped (not found / already inactive), or
 dry-run.
 
+### `postman_reenable_users.py`
+
+Reactivates Postman team members via the SCIM API -- the reverse of
+`postman_remove_users.py`. It can take a plain `name,email` CSV, or (more
+conveniently) a `removal_log_<ts>.json` written by the removal script, in
+which case only the users that were actually deactivated in that run
+(`action == "removed"`) are reactivated.
+
+#### Requirements
+
+- Python 3.7+ (standard library only).
+- A Postman SCIM API key (Team Settings → SCIM provisioning) -- see [Setup](#setup).
+
+#### Usage
+
+```sh
+# Reverse a specific removal run (dry run first -- no changes made).
+python3 postman_reenable_users.py --from-log removal_log_20260928T172635Z.json
+
+# Actually reactivate. Prompts for interactive confirmation unless --yes.
+python3 postman_reenable_users.py --from-log removal_log_20260928T172635Z.json --execute
+
+# Or drive it from a CSV of users to reactivate.
+python3 postman_reenable_users.py --csv reactivate.csv --execute
+```
+
+| Flag         | Description                                              | Default              |
+| ------------ | --------------------------------------------------------- | -------------------- |
+| `--csv`      | Input CSV with `name,email` columns                       | (one of `--csv`/`--from-log` required) |
+| `--from-log` | A `removal_log_<ts>.json` to reverse                      | (one of `--csv`/`--from-log` required) |
+| `--execute`  | Actually reactivate users (omit for a dry run)            | off (dry run)         |
+| `--yes`      | Skip the interactive confirmation prompt                 | off                    |
+| `--log`      | Path for the JSON audit log                               | `reenable_log_<timestamp>.json` |
+
+Every run (dry or real) writes a JSON audit log recording what happened to
+each row -- reactivated, failed, skipped (not found / already active), or
+dry-run.
+
 ## License
 
 [MIT](LICENSE)

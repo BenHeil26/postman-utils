@@ -7,3 +7,9 @@ venv/
 .env
 postman_secrets.sh
 removal_log_*.json
+reenable_log_*.json
+last_activity_since_apr1.json
+last_activity_*.json
+deactivated_actual_last_login.csv
+scratch_*.py
+*.out

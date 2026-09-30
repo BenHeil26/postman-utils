@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
 """
-Remove (deactivate) Postman team members listed in a CSV, by email.
+Re-enable (reactivate) Postman team members -- reverses postman_remove_users.py.
 
-Postman's SCIM API doesn't hard-delete a user on DELETE -- it deactivates
-their account and revokes team access. That's what this script drives.
+Postman's SCIM API reactivates a user with a PATCH setting active=true, the
+mirror image of the deactivate call.
 
 Source:
   - GET   /scim/v2/Users?filter=userName eq "<email>"  (look up SCIM id)
-  - PATCH /scim/v2/Users/<id>                           (deactivate: active=false)
+  - PATCH /scim/v2/Users/<id>                           (reactivate: active=true)
+
+Input (pick one):
+  --csv       CSV with an `email` column (a `name` column is optional).
+  --from-log  A removal_log_<ts>.json written by postman_remove_users.py;
+              only the rows whose action was "removed" are reactivated.
 
 Usage:
   # put POSTMAN_SCIM_KEY=PMAK-... in a .env file next to this script (see .env.example)
-  python3 postman_remove_users.py --csv postman_dormant_active.csv          # dry run (default)
-  python3 postman_remove_users.py --csv postman_dormant_active.csv --execute --yes
-
-Input CSV must have an `email` column (a `name` column is ignored/optional).
+  python3 postman_reenable_users.py --from-log removal_log_20260928T172635Z.json   # dry run (default)
+  python3 postman_reenable_users.py --from-log removal_log_20260928T172635Z.json --execute
+  python3 postman_reenable_users.py --csv reactivate.csv --execute --yes
 
 Output:
-  Prints a per-user result line and writes a JSON log (removal_log_<ts>.json)
+  Prints a per-user result line and writes a JSON log (reenable_log_<ts>.json)
   recording exactly what happened, for audit purposes.
 """
 
@@ -47,13 +51,12 @@ def get(path, api_key, params=None):
     return _send(req)
 
 
-def deactivate(scim_id, api_key):
-    """Postman's SCIM API doesn't implement DELETE for /Users (404s) --
-    deactivation is done via PATCH with a SCIM PatchOp body."""
+def reactivate(scim_id, api_key):
+    """Mirror of postman_remove_users.deactivate -- PATCH active=true."""
     url = BASE + f"/scim/v2/Users/{scim_id}"
     payload = json.dumps({
         "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-        "Operations": [{"op": "replace", "value": {"active": False}}],
+        "Operations": [{"op": "replace", "value": {"active": True}}],
     }).encode()
     req = urllib.request.Request(
         url,
@@ -95,7 +98,7 @@ def _send(req):
     raise SystemExit(f"giving up on {req.full_url} after retries")
 
 
-def load_targets(csv_path):
+def load_targets_from_csv(csv_path):
     targets = []
     with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
@@ -104,6 +107,22 @@ def load_targets(csv_path):
             if not email:
                 continue
             targets.append({"name": (row.get("name") or "").strip(), "email": email})
+    return targets
+
+
+def load_targets_from_log(log_path):
+    """Read a removal_log JSON and return only the users that were actually
+    deactivated (action == "removed"), so we reverse exactly that run."""
+    with open(log_path) as f:
+        data = json.load(f)
+    targets = []
+    for r in data.get("results", []):
+        if r.get("action") != "removed":
+            continue
+        email = (r.get("email") or "").strip()
+        if not email:
+            continue
+        targets.append({"name": (r.get("name") or "").strip(), "email": email})
     return targets
 
 
@@ -120,10 +139,12 @@ def find_scim_user(email, scim_key):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--csv", default="postman_dormant_active.csv", help="CSV with an `email` column")
-    ap.add_argument("--execute", action="store_true", help="Actually deactivate users (default: dry run)")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--csv", help="CSV with an `email` column")
+    src.add_argument("--from-log", dest="from_log", help="removal_log_<ts>.json to reverse")
+    ap.add_argument("--execute", action="store_true", help="Actually reactivate users (default: dry run)")
     ap.add_argument("--yes", action="store_true", help="Skip the interactive confirmation prompt")
-    ap.add_argument("--log", default=None, help="Path for the JSON audit log (default: removal_log_<ts>.json)")
+    ap.add_argument("--log", default=None, help="Path for the JSON audit log (default: reenable_log_<ts>.json)")
     args = ap.parse_args()
 
     load_dotenv()
@@ -131,17 +152,22 @@ def main():
     if not scim_key:
         raise SystemExit("set POSTMAN_SCIM_KEY in a .env file (see .env.example) or the environment first")
 
-    targets = load_targets(args.csv)
+    if args.from_log:
+        targets = load_targets_from_log(args.from_log)
+        source = args.from_log
+    else:
+        targets = load_targets_from_csv(args.csv)
+        source = args.csv
     if not targets:
-        raise SystemExit(f"no rows with an email column found in {args.csv}")
+        raise SystemExit(f"no users to reactivate found in {source}")
 
-    print(f"loaded {len(targets)} user(s) from {args.csv}", file=sys.stderr)
+    print(f"loaded {len(targets)} user(s) from {source}", file=sys.stderr)
 
     if args.execute and not args.yes:
-        print(f"\nAbout to DEACTIVATE {len(targets)} Postman user(s):", file=sys.stderr)
+        print(f"\nAbout to REACTIVATE {len(targets)} Postman user(s):", file=sys.stderr)
         for t in targets:
             print(f"  - {t['name'] or '(no name)'} <{t['email']}>", file=sys.stderr)
-        reply = input(f"\nType 'yes' to deactivate all {len(targets)} listed users: ")
+        reply = input(f"\nType 'yes' to reactivate all {len(targets)} listed users: ")
         if reply.strip().lower() != "yes":
             raise SystemExit("aborted, no changes made")
 
@@ -159,35 +185,35 @@ def main():
             continue
 
         scim_id = user.get("id")
-        already_inactive = user.get("active") is False
-        if already_inactive:
-            print(f"SKIP  {email}: already inactive")
-            results.append({**t, "scim_id": scim_id, "action": "skip", "reason": "already inactive"})
+        already_active = user.get("active") is True
+        if already_active:
+            print(f"SKIP  {email}: already active")
+            results.append({**t, "scim_id": scim_id, "action": "skip", "reason": "already active"})
             continue
 
         if not args.execute:
-            print(f"WOULD REMOVE  {email}  (scim_id={scim_id})")
+            print(f"WOULD REACTIVATE  {email}  (scim_id={scim_id})")
             results.append({**t, "scim_id": scim_id, "action": "dry_run"})
             continue
 
-        del_status, del_body = deactivate(scim_id, scim_key)
-        ok = del_status in (200, 204)
-        print(f"{'REMOVED' if ok else 'FAILED '} {email}  (scim_id={scim_id}, HTTP {del_status})")
+        act_status, act_body = reactivate(scim_id, scim_key)
+        ok = act_status in (200, 204)
+        print(f"{'REACTIVATED' if ok else 'FAILED     '} {email}  (scim_id={scim_id}, HTTP {act_status})")
         results.append({
             **t,
             "scim_id": scim_id,
-            "action": "removed" if ok else "failed",
-            "http_status": del_status,
-            "response": del_body if not ok else None,
+            "action": "reactivated" if ok else "failed",
+            "http_status": act_status,
+            "response": act_body if not ok else None,
         })
 
-    log_path = args.log or f"removal_log_{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    log_path = args.log or f"reenable_log_{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
     with open(log_path, "w") as f:
-        json.dump({"mode": mode, "csv": args.csv, "results": results}, f, indent=2, default=str)
+        json.dump({"mode": mode, "source": source, "results": results}, f, indent=2, default=str)
     print(f"\nwrote {log_path}", file=sys.stderr)
 
     if not args.execute:
-        print("\nDry run only -- re-run with --execute to actually deactivate these users.", file=sys.stderr)
+        print("\nDry run only -- re-run with --execute to actually reactivate these users.", file=sys.stderr)
 
 
 if __name__ == "__main__":
